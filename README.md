@@ -107,6 +107,20 @@ RAG repository is in order to run:
 - **The database** is reached by URL (`127.0.0.1:5433`), so the container `rag-db` has to be running already
   (`podman start rag-db`). If it is not, the tool answers with an error that says so.
 
+### What must be ready for a search to work
+
+A search needs both the model and the database; the difference is who puts them in place.
+
+| piece | needed for a search | who starts it | how to check |
+|---|---|---|---|
+| PostgreSQL container `rag-db` (index `full_SEMH_bge`) | yes | **you**, before opening the client: `podman machine start` if Podman is stopped, then `podman start rag-db` | `podman ps` lists `rag-db` |
+| bge-m3 model | yes | **the server**, on the first search (a few seconds, about 1.1 GB of RAM; it stays loaded while the session lasts) | its files exist in `../rag/models/bge-m3` (git-ignored: download them again on a new machine) |
+| the MCP server | yes | **the client**, when the session opens | `claude mcp list` shows `gcp-rag` connected |
+| `.venv` of this repository | yes | `uv sync`, once | `.venv/Scripts/python.exe` exists |
+
+"Connected" in `claude mcp list` only proves that the server process started: the database and the model are first
+touched by the first search, so a stopped container shows up as an error on the first question, not before.
+
 Two environment variables change where it looks, if the defaults do not fit:
 
 | variable | default |
