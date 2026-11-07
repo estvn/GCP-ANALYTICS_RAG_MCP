@@ -4,7 +4,7 @@ An MCP server, built with [FastMCP](https://gofastmcp.com), that lets Claude Cod
 Google Cloud Data Analytics course through the retrieval system of
 [`GCP-ANALYTICS_RAG`](https://github.com/estvn/GCP-ANALYTICS_RAG).
 
-**Status: built and tested (15 tests), not tried from Claude Code yet.** It was run as a separate process over stdio
+**Status: built and tested (24 tests), not tried from Claude Code yet.** It was run as a separate process over stdio
 against the real index and the real model; the command to register it in Claude Code is [below](#use-it).
 
 ## What it does
@@ -23,17 +23,19 @@ model does that from the chunks. This server gives the model one tool to call.
    PostgreSQL + pgvector (container `rag-db`) ◄───┘
 ```
 
-### The tool: `gcp_course_search`
+### The tool: `gcp_rag_search_course`
 
 | argument | meaning |
 |---|---|
-| `question` | the question, as the user asked it |
-| `translation` | the same question translated into the other language (English if it is in Spanish, Spanish if it is in English); the course has passages in both |
+| `question` | the question, as the user asked it (1 to 2000 characters) |
+| `translation` | the same question translated into the other language (English if it is in Spanish, Spanish if it is in English); the course has passages in both (1 to 2000 characters) |
 | `k` | how many chunks to return, from 1 to 100 (30 by default) |
 
 It returns a list of chunks, best first, each with `rank`, `source` (the file), `headers` (the header path) and `text`.
-The tool is marked read-only. If the search fails it answers with an error that says what to check (the `rag-db`
-container and the model files).
+The first line of each chunk (path and headers) is removed from `text` because it already comes in `source` and
+`headers`. The tool is marked read-only. If the search fails it answers with an error that names the kind of failure and
+says what to check (the `rag-db` container and the model files); the detail goes to the server log (stderr), never to the
+client, so no host or password can leak through it.
 
 The translation is a required argument on purpose: the retrieval technique that won the experiments searches the question
 and its translation and fuses both rankings, and the RAG does not translate. The language model that calls the tool
@@ -46,7 +48,7 @@ container `rag-db` running with the index `full_SEMH_bge`, and the bge-m3 files 
 
 ```bash
 uv sync
-uv run pytest                     # 15 tests; the integration test needs the database and the model
+uv run pytest                     # 24 tests; the integration test needs the database and the model
 uv run python -m gcp_rag_mcp      # starts the server over stdio (an MCP client normally does this)
 ```
 
@@ -60,8 +62,21 @@ Two environment variables change where it looks, if the defaults do not fit:
 
 | variable | default |
 |---|---|
-| `RAG_DATABASE_URL` | `postgresql://rag:rag@127.0.0.1:5433/full_SEMH_bge` (the index of the winning configuration, local credentials) |
+| `RAG_DATABASE_URL` | `postgresql://rag:rag@127.0.0.1:5433/full_SEMH_bge?connect_timeout=5` (the index of the winning configuration, local credentials; with the database down the tool fails in 5 seconds) |
 | `RAG_MODEL_DIR` | the `models/bge-m3` folder of the RAG repository |
+
+## Examples
+
+Real calls through the server over stdio (first three chunks of each answer, `k=5`):
+
+| question | best chunk (source > headers) |
+|---|---|
+| ¿Qué diferencia hay entre una tabla particionada y una agrupada en BigQuery? | `016_CREATE_PARTITIONED_TABLE.md` > Crea una tabla particionada |
+| ¿Para qué sirve Dataproc? | `022_HOW_TO_MANAGE_DATAPROC_CLUSTERS.md` > Cómo administrar clústeres de Dataproc; then `020_KEY_PROCESSES_BENEFITS_DATAPROC.md` |
+| ¿Cómo se crea un panel de control en Looker Studio? | `014_GUIDE_LOOKER_STUDIO.md` > Guía para Looker Studio > Cómo ver y crear un informe |
+
+The first question mixes two concepts (partitioned and clustered): the top three chunks are all about partitioning, so
+a model should ask again or use a larger `k` to cover the clustered side. This is one reason to keep `k` at 30.
 
 ## What was measured
 
@@ -115,11 +130,29 @@ LLM API with the chunks.
   even if nobody asks anything. Loading on the first question and not at start-up means it costs nothing until then.
 - For occasional use a command run through the shell is almost as good and much cheaper to build.
 
+## Conformance with the MCP builder standards
+
+Applied: server name `gcp_rag_mcp`; tool name `{service}_{action}_{resource}`; the four annotations; Pydantic limits on
+every argument with descriptions; actionable errors without internal detail; logs on stderr only (stdout is the
+protocol); boundary tests (k at 1, 100, 0 and 101; empty and over-long text); timeout on the database connection.
+
+Deliberately not applied:
+
+- **Async tool.** The tool is sync: the search is CPU-bound ONNX and a blocking `psycopg` call; FastMCP runs it in a
+  thread pool, and a lock keeps one search at a time.
+- **Markdown output.** JSON only: the caller is a model that cites `source` and `headers`.
+- **Pagination.** `k` bounds the answer (at most 100 chunks); a second page would only mean a bigger `k`.
+- **Lifespan.** The model loads lazily on the first search instead, so an idle server costs nothing.
+- **`tools/` folder.** One tool; see the decisions below.
+- **pytest-asyncio.** The `anyio` pytest plugin that comes with FastMCP's dependencies is used.
+- **Credentials.** The default URL holds local development credentials of a container on `127.0.0.1`; use
+  `RAG_DATABASE_URL` for anything else.
+
 ## Decisions taken
 
 - **FastMCP 4.1.3, pinned.** It was 18 days old when chosen; the newest release (4.1.6) was 4 days old and this series
   is published every few days.
-- **One tool.** `gcp_course_search`; more can be added when there is a use for them. For that reason the code is flat
+- **One tool.** `gcp_rag_search_course`; more can be added when there is a use for them. For that reason the code is flat
   (`server.py`) and has no `tools/` folder yet: a sub-package for a single tool would be clutter.
 - **The model is loaded on the first question**, with the database connection. If a search fails, the connection is
   closed and reopened on the next one; the model is kept.
@@ -146,7 +179,7 @@ README.md
 
 ## Checks run
 
-- 15 tests: the tool, its arguments and its errors through FastMCP's in-memory client; the lazy loading and the
+- 24 tests: the tool, its arguments, its limits and its errors through FastMCP's in-memory client; the lazy loading and the
   reconnection with stand-ins; the settings; and one test with the real model and index.
 - Bandit (no issues), pip-audit on the pinned dependencies (no known vulnerabilities) and detect-secrets (none), and Ruff.
 
