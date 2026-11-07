@@ -4,8 +4,8 @@ An MCP server, built with [FastMCP](https://gofastmcp.com), that lets Claude Cod
 Google Cloud Data Analytics course through the retrieval system of
 [`GCP-ANALYTICS_RAG`](https://github.com/estvn/GCP-ANALYTICS_RAG).
 
-**Status: built and tested (24 tests), not tried from Claude Code yet.** It was run as a separate process over stdio
-against the real index and the real model; the command to register it in Claude Code is [below](#use-it).
+**Status: built, tested (24 tests) and registered in Claude Code** (`claude mcp list` shows it connected). It was run as a
+separate process over stdio against the real index and the real model; [how to register it](#register-it-in-a-client).
 
 ## What it does
 
@@ -52,11 +52,60 @@ uv run pytest                     # 24 tests; the integration test needs the dat
 uv run python -m gcp_rag_mcp      # starts the server over stdio (an MCP client normally does this)
 ```
 
-To register it in Claude Code (this changes your Claude Code configuration, so it is not done by this repository):
+## Register it in a client
+
+The server is started by the client, not by hand: the client launches the command below as a child process and talks to
+it over stdio. Use the Python of this repository's virtual environment (`uv sync` creates `.venv`); replace
+`<repo>` with the absolute path of this repository (forward slashes work on Windows).
+
+**Claude Code** (command; registered for this machine's user, and checked with `claude mcp list`):
 
 ```bash
-claude mcp add gcp-rag --scope user -- "<path to this repository>/.venv/Scripts/python.exe" -m gcp_rag_mcp
+claude mcp add gcp-rag --scope user -- "<repo>/.venv/Scripts/python.exe" -m gcp_rag_mcp
 ```
+
+**Claude Code** (manual JSON, in `~/.claude.json` for the user scope or `.mcp.json` of a project):
+
+```json
+{
+  "mcpServers": {
+    "gcp-rag": {
+      "command": "<repo>/.venv/Scripts/python.exe",
+      "args": ["-m", "gcp_rag_mcp"]
+    }
+  }
+}
+```
+
+**OpenCode** (manual JSON, in `opencode.json`; its format differs: `command` is one array):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "gcp-rag": {
+      "type": "local",
+      "command": ["<repo>/.venv/Scripts/python.exe", "-m", "gcp_rag_mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+On Linux or macOS the interpreter is `<repo>/.venv/bin/python`. To change the database or the model folder, add the
+variables of the next table: `"env": {...}` in Claude Code, `"environment": {...}` in OpenCode.
+
+## What starts what
+
+The client starts **the server only**. The server does not start the database, and it does not need to know where the
+RAG repository is in order to run:
+
+- **The code of the RAG** is found because `rag` is an editable dependency (`../rag`) installed in this `.venv`; the
+  client runs this `.venv`'s Python, so `import rag` works from any working directory.
+- **The model** (`models/bge-m3`) is found from the location of that same installed package, and loads on the first
+  search, not at start-up.
+- **The database** is reached by URL (`127.0.0.1:5433`), so the container `rag-db` has to be running already
+  (`podman start rag-db`). If it is not, the tool answers with an error that says so.
 
 Two environment variables change where it looks, if the defaults do not fit:
 
@@ -185,7 +234,7 @@ README.md
 
 ## What is not proven yet
 
-- **That Claude Code uses it well.** It was tested with FastMCP's own client over stdio, not from Claude Code.
+- **That Claude Code uses it well.** It is registered and connects, but it has not been tried yet with real questions in Spanish.
 - **That a language model answers well with these chunks.** The golden-set experiments of the RAG repository measure
   where the correct chunk ranks, not the quality of a generated answer. Using this server from Claude Code with real
   questions in Spanish is how that gets tested.
