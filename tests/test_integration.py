@@ -29,7 +29,7 @@ async def test_a_real_question_returns_30_chunks_with_their_sources(settings):
 
     async with Client(server) as client:
         result = await client.call_tool(
-            "gcp_course_search",
+            "gcp_rag_search_course",
             {"question": "¿Cómo se particiona una base de datos por columnas?", "translation": "How is a database partitioned by columns?"},
         )
 

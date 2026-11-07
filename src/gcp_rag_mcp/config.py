@@ -8,7 +8,8 @@ from pathlib import Path
 import rag
 
 # The index of the winning configuration: semantic + header cuts, embedded with bge-m3 (local development credentials).
-DEFAULT_DATABASE_URL = "postgresql://rag:rag@127.0.0.1:5433/full_SEMH_bge"
+# connect_timeout: with the database down the tool answers with an error in 5 seconds instead of waiting for the system.
+DEFAULT_DATABASE_URL = "postgresql://rag:rag@127.0.0.1:5433/full_SEMH_bge?connect_timeout=5"
 # The models folder of the rag repository, found from the (editable) install of the `rag` package.
 DEFAULT_MODEL_DIR = Path(rag.__file__).resolve().parents[2] / "models" / "bge-m3"
 

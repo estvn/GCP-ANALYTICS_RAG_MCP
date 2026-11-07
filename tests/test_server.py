@@ -1,11 +1,14 @@
+import logging
+
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from gcp_rag_mcp.server import create_server
+from gcp_rag_mcp.server import MAX_QUESTION_CHARS, create_server
 
 pytestmark = pytest.mark.anyio
 
+TOOL = "gcp_rag_search_course"
 QUESTION = "¿Cómo se particiona una base de datos por columnas?"
 TRANSLATION = "How is a database partitioned by columns?"
 
@@ -41,14 +44,14 @@ class RecordingSearch:
 
 async def call(search, **arguments):
     async with Client(create_server(search)) as client:
-        return await client.call_tool("gcp_course_search", arguments)
+        return await client.call_tool(TOOL, arguments)
 
 
 async def test_the_server_offers_one_read_only_search_tool():
     async with Client(create_server(RecordingSearch())) as client:
         tools = await client.list_tools()
 
-    assert [t.name for t in tools] == ["gcp_course_search"]
+    assert [t.name for t in tools] == [TOOL]
     assert tools[0].annotations.read_only_hint is True
     assert tools[0].annotations.open_world_hint is False
 
@@ -78,33 +81,87 @@ async def test_it_returns_30_chunks_unless_asked_for_another_number():
     assert search.calls[0][1] == 30
 
 
-async def test_an_empty_question_is_rejected_before_searching():
+@pytest.mark.parametrize("k", [1, 100])
+async def test_the_smallest_and_the_largest_number_of_chunks_are_accepted(k):
+    search = RecordingSearch()
+
+    await call(search, question=QUESTION, translation=TRANSLATION, k=k)
+
+    assert search.calls[0][1] == k
+
+
+@pytest.mark.parametrize("k", [0, 101])
+async def test_a_number_of_chunks_outside_1_to_100_is_rejected(k):
     search = RecordingSearch()
 
     with pytest.raises(ToolError):
-        await call(search, question="", translation=TRANSLATION)
+        await call(search, question=QUESTION, translation=TRANSLATION, k=k)
 
     assert search.calls == []
 
 
-async def test_a_number_of_chunks_outside_1_to_100_is_rejected():
-    for k in (0, 101):
-        with pytest.raises(ToolError):
-            await call(RecordingSearch(), question=QUESTION, translation=TRANSLATION, k=k)
+@pytest.mark.parametrize("field", ["question", "translation"])
+async def test_an_empty_text_is_rejected_before_searching(field):
+    search = RecordingSearch()
+    arguments = {"question": QUESTION, "translation": TRANSLATION, field: ""}
+
+    with pytest.raises(ToolError):
+        await call(search, **arguments)
+
+    assert search.calls == []
 
 
-async def test_a_failing_search_gives_an_error_that_says_what_to_check():
-    search = RecordingSearch(error=RuntimeError("connection refused"))
+@pytest.mark.parametrize("field", ["question", "translation"])
+async def test_a_text_longer_than_the_limit_is_rejected_before_searching(field):
+    search = RecordingSearch()
+    arguments = {"question": QUESTION, "translation": TRANSLATION, field: "a" * (MAX_QUESTION_CHARS + 1)}
+
+    with pytest.raises(ToolError):
+        await call(search, **arguments)
+
+    assert search.calls == []
+
+
+async def test_a_text_exactly_at_the_limit_is_accepted():
+    search = RecordingSearch()
+
+    await call(search, question="a" * MAX_QUESTION_CHARS, translation=TRANSLATION)
+
+    assert len(search.calls) == 1
+
+
+async def test_a_failing_search_tells_the_client_what_to_check_without_the_internal_detail():
+    search = RecordingSearch(error=RuntimeError("password=sentinel-secret host=10.0.0.5"))
 
     with pytest.raises(ToolError) as error:
         await call(search, question=QUESTION, translation=TRANSLATION)
 
     message = str(error.value)
-    assert "RuntimeError" in message and "connection refused" in message
+    assert "RuntimeError" in message
     assert "rag-db" in message and "model" in message
+    assert "sentinel-secret" not in message and "10.0.0.5" not in message
+
+
+async def test_the_internal_detail_of_a_failure_is_logged_on_the_server(caplog):
+    search = RecordingSearch(error=RuntimeError("connection refused by 10.0.0.5"))
+
+    with caplog.at_level(logging.ERROR, logger="gcp_rag_mcp"), pytest.raises(ToolError):
+        await call(search, question=QUESTION, translation=TRANSLATION)
+
+    assert "connection refused by 10.0.0.5" in caplog.text
 
 
 async def test_a_search_without_results_returns_an_empty_list():
     result = await call(RecordingSearch(hits=[]), question=QUESTION, translation=TRANSLATION)
 
     assert result.structured_content["result"] == []
+
+
+async def test_the_text_does_not_repeat_the_path_and_headers_that_the_chunk_already_carries():
+    prefixed = {**hit(1), "text": "02_COURSE/001_FILE > Partitioning > Vertical\nThe body of the chunk"}
+
+    result = await call(RecordingSearch(hits=[prefixed]), question=QUESTION, translation=TRANSLATION)
+
+    chunk = result.structured_content["result"][0]
+    assert chunk["text"] == "The body of the chunk"
+    assert chunk["source"] == "02_COURSE/001_FILE.md" and chunk["headers"] == ["Partitioning", "Vertical"]
