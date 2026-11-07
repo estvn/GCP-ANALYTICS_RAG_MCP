@@ -1,0 +1,25 @@
+[project]
+name = "gcp-rag-mcp"
+version = "0.1.0"
+description = "MCP server (FastMCP) that exposes the retrieval of the GCP Analytics RAG"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp==4.1.3",
+    "rag",
+]
+
+[tool.uv.sources]
+rag = { path = "../rag", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+markers = ["integration: needs the database and the bge-m3 model files"]
