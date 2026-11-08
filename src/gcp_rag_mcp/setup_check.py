@@ -27,6 +27,7 @@ GUIDE = """What a search needs, and where to get each piece:
    and OpenCode).
 
 Only the database has to be started by hand; the server and the model start by themselves.
+All of the above in one go: `./setup.sh` in this repository (`./setup.sh --check` only reports what is missing).
 """
 
 

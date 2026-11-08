@@ -91,6 +91,7 @@ def test_the_guide_says_where_to_get_each_piece_and_where_the_model_goes(model_d
         "https://github.com/estvn/GCP-ANALYTICS_RAG_MCP",
         "https://huggingface.co/onnx-community/bge-m3-ONNX",
         "podman start rag-db",
+        "./setup.sh",
         str(model_dir),
     ):
         assert piece in guide
