@@ -136,6 +136,13 @@ A search needs five things. Only the database container has to be started by han
 | the bge-m3 model, int8 ONNX | [onnx-community/bge-m3-ONNX](https://huggingface.co/onnx-community/bge-m3-ONNX) | download `onnx/model_int8.onnx`, `tokenizer.json` and `config.json` into `../rag/models/bge-m3/` (`onnx/model_int8.onnx` there) |
 | Claude Code or OpenCode | | [register the server](#register-it-in-a-client) |
 
+**All in one command.** `./setup.sh` (Git Bash on Windows, or any Linux or macOS shell) does every row of the table that is
+missing and leaves alone what is already there: it clones the RAG repository next to this one, runs `uv sync`, downloads the
+three model files (and checks the SHA-256 of `model_int8.onnx`), creates or starts the `rag-db` container and waits until it
+answers. It needs `git`, `uv`, `podman` and `curl`. `./setup.sh --check` only reports what is missing, changes nothing and
+exits with 1 if something is missing. It was run for real in an empty folder (clone, 542 MB download, hash check, running
+container) and in check mode; the paths for a stopped container and for a stopped Podman machine were not exercised.
+
 ```bash
 podman run -d --name rag-db -p 127.0.0.1:5433:5432 -v rag_pgdata:/var/lib/postgresql/data   ghcr.io/estvn/gcp-rag-db:bge-m3        # first time: restores the index, a few seconds
 podman start rag-db                      # the next times (and `podman machine start` first if Podman is stopped)
