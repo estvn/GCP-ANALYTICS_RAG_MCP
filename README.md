@@ -23,6 +23,14 @@ model does that from the chunks. This server gives the model one tool to call.
    PostgreSQL + pgvector (container `rag-db`) ◄───┘
 ```
 
+### How it works
+
+![MCP server architecture: client, stdio process with its two tools, and the RAG package, model and database it uses](docs/diagrams/mcp-architecture.png)
+
+The diagram is a draw.io file (`docs/diagrams/mcp-architecture.drawio`, editable at [app.diagrams.net](https://app.diagrams.net))
+with its PNG export. The whole system, from the database to the client, is in the
+[RAG repository](https://github.com/estvn/GCP-ANALYTICS_RAG#architecture).
+
 ### The tool: `gcp_rag_search_course`
 
 | argument | meaning |
@@ -266,6 +274,7 @@ src/gcp_rag_mcp/
 ├── setup_check.py  # run_checks: model files and database, and the setup guide for the help tool
 └── server.py       # create_server: the FastMCP server and its tool
 tests/              # mirrors src/; test_integration.py needs the database and the model
+docs/diagrams/      # architecture diagram (.drawio and .png)
 pyproject.toml
 README.md
 ```
