@@ -10,6 +10,8 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 from rag.retrieval.search import DEFAULT_K
 
+from gcp_rag_mcp.setup_check import SetupReport
+
 logger = logging.getLogger(__name__)
 
 SearchFn = Callable[[list[str], int], list[dict]]
@@ -18,7 +20,9 @@ MAX_QUESTION_CHARS = 2000  # about 500 tokens: far more than a question needs, a
 
 INSTRUCTIONS = (
     "Searches the material of the Google Cloud Data Analytics course. Use gcp_rag_search_course to find passages "
-    "before answering a question about the course, and cite the source file and headers of the passages you use."
+    "before answering a question about the course, and cite the source file and headers of the passages you use. "
+    "If a search fails, or you are not sure the database and the model are ready, call gcp_rag_check_setup and tell "
+    "the user what is missing and where to get it."
 )
 SEARCH_FAILED = (
     "The course search failed ({kind}). Check that the database container `rag-db` is running "
@@ -39,7 +43,7 @@ def _body(hit: dict) -> str:
     return hit["text"].removeprefix(prefix)
 
 
-def create_server(search: SearchFn) -> FastMCP:
+def create_server(search: SearchFn, check_setup: Callable[[], SetupReport]) -> FastMCP:
     server = FastMCP("gcp_rag_mcp", instructions=INSTRUCTIONS)
 
     @server.tool(
@@ -71,5 +75,18 @@ def create_server(search: SearchFn) -> FastMCP:
             logger.exception("The course search failed")  # the detail stays on the server (stderr), not in the answer
             raise ToolError(SEARCH_FAILED.format(kind=type(error).__name__)) from error
         return [Chunk(rank=rank, source=h["source"], headers=h["headers"], text=_body(h)) for rank, h in enumerate(hits, 1)]
+
+    @server.tool(
+        name="gcp_rag_check_setup",
+        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    )
+    def gcp_rag_check_setup() -> SetupReport:
+        """Check that the model files and the database of the course search are ready, and say how to set up what is missing.
+
+        Returns `ready`, one check per piece (model, database) with its detail, and a guide with where to get each piece:
+        the database container image, the model files, and the repositories of the RAG and of this server. Call it when a
+        search fails or before the first search of a session.
+        """
+        return check_setup()
 
     return server

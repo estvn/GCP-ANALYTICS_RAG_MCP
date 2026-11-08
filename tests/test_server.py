@@ -9,6 +9,8 @@ from gcp_rag_mcp.server import MAX_QUESTION_CHARS, create_server
 pytestmark = pytest.mark.anyio
 
 TOOL = "gcp_rag_search_course"
+HELP_TOOL = "gcp_rag_check_setup"
+REPORT = {"ready": False, "checks": [{"name": "database", "ok": False, "detail": "cannot read the index"}], "guide": "Start rag-db"}
 QUESTION = "¿Cómo se particiona una base de datos por columnas?"
 TRANSLATION = "How is a database partitioned by columns?"
 
@@ -43,17 +45,25 @@ class RecordingSearch:
 
 
 async def call(search, **arguments):
-    async with Client(create_server(search)) as client:
+    async with Client(create_server(search, lambda: REPORT)) as client:
         return await client.call_tool(TOOL, arguments)
 
 
-async def test_the_server_offers_one_read_only_search_tool():
-    async with Client(create_server(RecordingSearch())) as client:
+async def test_the_server_offers_a_search_tool_and_a_setup_check_and_both_are_read_only():
+    async with Client(create_server(RecordingSearch(), lambda: REPORT)) as client:
         tools = await client.list_tools()
 
-    assert [t.name for t in tools] == [TOOL]
-    assert tools[0].annotations.read_only_hint is True
-    assert tools[0].annotations.open_world_hint is False
+    assert sorted(t.name for t in tools) == [HELP_TOOL, TOOL]
+    for tool in tools:
+        assert tool.annotations.read_only_hint is True
+        assert tool.annotations.open_world_hint is False
+
+
+async def test_the_setup_check_returns_the_report_with_what_is_missing_and_the_guide():
+    async with Client(create_server(RecordingSearch(), lambda: REPORT)) as client:
+        result = await client.call_tool(HELP_TOOL, {})
+
+    assert result.structured_content == REPORT
 
 
 async def test_each_chunk_comes_with_its_rank_source_headers_and_text_only():

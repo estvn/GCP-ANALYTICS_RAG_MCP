@@ -7,6 +7,7 @@ from fastmcp import Client
 from gcp_rag_mcp.config import Settings
 from gcp_rag_mcp.retriever import build_retriever
 from gcp_rag_mcp.server import create_server
+from gcp_rag_mcp.setup_check import run_checks
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -25,7 +26,7 @@ def settings():
 
 
 async def test_a_real_question_returns_30_chunks_with_their_sources(settings):
-    server = create_server(build_retriever(settings).search)
+    server = create_server(build_retriever(settings).search, lambda: run_checks(settings))
 
     async with Client(server) as client:
         result = await client.call_tool(
@@ -37,3 +38,15 @@ async def test_a_real_question_returns_30_chunks_with_their_sources(settings):
     assert len(chunks) == 30
     assert [c["rank"] for c in chunks] == list(range(1, 31))
     assert all(c["source"].endswith(".md") and c["text"] for c in chunks)
+
+
+async def test_the_setup_check_finds_the_real_model_and_database_ready(settings):
+    server = create_server(build_retriever(settings).search, lambda: run_checks(settings))
+
+    async with Client(server) as client:
+        result = await client.call_tool("gcp_rag_check_setup", {})
+
+    report = result.structured_content
+    assert report["ready"] is True
+    assert [c["name"] for c in report["checks"]] == ["model", "database"]
+    assert "ghcr.io/estvn/gcp-rag-db:bge-m3" in report["guide"]
