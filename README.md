@@ -4,7 +4,7 @@ An MCP server, built with [FastMCP](https://gofastmcp.com), that lets Claude Cod
 Google Cloud Data Analytics course through the retrieval system of
 [`GCP-ANALYTICS_RAG`](https://github.com/estvn/GCP-ANALYTICS_RAG).
 
-**Status: built, tested (24 tests) and registered in Claude Code** (`claude mcp list` shows it connected). It was run as a
+**Status: built, tested (31 tests) and registered in Claude Code** (`claude mcp list` shows it connected). It was run as a
 separate process over stdio against the real index and the real model; [how to register it](#register-it-in-a-client).
 
 ## What it does
@@ -41,14 +41,23 @@ The translation is a required argument on purpose: the retrieval technique that 
 and its translation and fuses both rankings, and the RAG does not translate. The language model that calls the tool
 writes the translation, so no translation model is needed.
 
+### The help tool: `gcp_rag_check_setup`
+
+No arguments. A new Claude session can call it to find out whether a search will work: it checks that the three bge-m3
+files are in the model folder and that the database answers with a non-empty index, and it returns `ready`, one check per
+piece with its detail, and a guide with where to get what is missing (the same links as the section below). The server
+tells the model to call it when a search fails. A failure never reveals the database host or password to the client: the
+detail stays in the server log.
+
 ## Use it
 
 Requirements: the RAG repository next to this one (`../rag`, installed as an editable dependency), the PostgreSQL
-container `rag-db` running with the index `full_SEMH_bge`, and the bge-m3 files in `../rag/models/bge-m3`.
+container `rag-db` running with the index `courses_bge`, and the bge-m3 files in `../rag/models/bge-m3`. Where to get
+each piece is in [Setup: what to download and start](#setup-what-to-download-and-start).
 
 ```bash
 uv sync
-uv run pytest                     # 24 tests; the integration test needs the database and the model
+uv run pytest                     # 31 tests; the integration test needs the database and the model
 uv run python -m gcp_rag_mcp      # starts the server over stdio (an MCP client normally does this)
 ```
 
@@ -107,13 +116,33 @@ RAG repository is in order to run:
 - **The database** is reached by URL (`127.0.0.1:5433`), so the container `rag-db` has to be running already
   (`podman start rag-db`). If it is not, the tool answers with an error that says so.
 
+## Setup: what to download and start
+
+A search needs five things. Only the database container has to be started by hand.
+
+| piece | where to get it | how |
+|---|---|---|
+| this server | [estvn/GCP-ANALYTICS_RAG_MCP](https://github.com/estvn/GCP-ANALYTICS_RAG_MCP) | `git clone`, then `uv sync` |
+| the RAG code (retrieval, chunker, store) | [estvn/GCP-ANALYTICS_RAG](https://github.com/estvn/GCP-ANALYTICS_RAG), cloned **next to** this repository as `../rag` | `git clone`; it is installed here as an editable dependency |
+| the index (PostgreSQL 17 + pgvector, database `courses_bge`) | image `ghcr.io/estvn/gcp-rag-db:bge-m3` (public; `:e5-small` is the light variant, database `courses_e5`) | see below |
+| the bge-m3 model, int8 ONNX | [onnx-community/bge-m3-ONNX](https://huggingface.co/onnx-community/bge-m3-ONNX) | download `onnx/model_int8.onnx`, `tokenizer.json` and `config.json` into `../rag/models/bge-m3/` (`onnx/model_int8.onnx` there) |
+| Claude Code or OpenCode | | [register the server](#register-it-in-a-client) |
+
+```bash
+podman run -d --name rag-db -p 127.0.0.1:5433:5432 -v rag_pgdata:/var/lib/postgresql/data   ghcr.io/estvn/gcp-rag-db:bge-m3        # first time: restores the index, a few seconds
+podman start rag-db                      # the next times (and `podman machine start` first if Podman is stopped)
+```
+
+The `model_int8.onnx` used here and the one in that Hugging Face repository have the same SHA-256 (`2237f770...`). The image holds the index and not the model, and the index must be
+queried with the model it was built with (bge-m3 for `:bge-m3`; the server is wired to bge-m3).
+
 ### What must be ready for a search to work
 
 A search needs both the model and the database; the difference is who puts them in place.
 
 | piece | needed for a search | who starts it | how to check |
 |---|---|---|---|
-| PostgreSQL container `rag-db` (index `full_SEMH_bge`) | yes | **you**, before opening the client: `podman machine start` if Podman is stopped, then `podman start rag-db` | `podman ps` lists `rag-db` |
+| PostgreSQL container `rag-db` (index `courses_bge`) | yes | **you**, before opening the client: `podman machine start` if Podman is stopped, then `podman start rag-db` | `podman ps` lists `rag-db` |
 | bge-m3 model | yes | **the server**, on the first search (a few seconds, about 1.1 GB of RAM; it stays loaded while the session lasts) | its files exist in `../rag/models/bge-m3` (git-ignored: download them again on a new machine) |
 | the MCP server | yes | **the client**, when the session opens | `claude mcp list` shows `gcp-rag` connected |
 | `.venv` of this repository | yes | `uv sync`, once | `.venv/Scripts/python.exe` exists |
@@ -125,7 +154,7 @@ Two environment variables change where it looks, if the defaults do not fit:
 
 | variable | default |
 |---|---|
-| `RAG_DATABASE_URL` | `postgresql://rag:rag@127.0.0.1:5433/full_SEMH_bge?connect_timeout=5` (the index of the winning configuration, local credentials; with the database down the tool fails in 5 seconds) |
+| `RAG_DATABASE_URL` | `postgresql://rag:rag@127.0.0.1:5433/courses_bge?connect_timeout=5` (the index of the winning configuration with the GCP and Power BI courses, local credentials; with the database down the tool fails in 5 seconds) |
 | `RAG_MODEL_DIR` | the `models/bge-m3` folder of the RAG repository |
 
 ## Examples
@@ -206,7 +235,7 @@ Deliberately not applied:
 - **Markdown output.** JSON only: the caller is a model that cites `source` and `headers`.
 - **Pagination.** `k` bounds the answer (at most 100 chunks); a second page would only mean a bigger `k`.
 - **Lifespan.** The model loads lazily on the first search instead, so an idle server costs nothing.
-- **`tools/` folder.** One tool; see the decisions below.
+- **`tools/` folder.** Two small tools; see the decisions below.
 - **pytest-asyncio.** The `anyio` pytest plugin that comes with FastMCP's dependencies is used.
 - **Credentials.** The default URL holds local development credentials of a container on `127.0.0.1`; use
   `RAG_DATABASE_URL` for anything else.
@@ -215,7 +244,7 @@ Deliberately not applied:
 
 - **FastMCP 4.1.3, pinned.** It was 18 days old when chosen; the newest release (4.1.6) was 4 days old and this series
   is published every few days.
-- **One tool.** `gcp_rag_search_course`; more can be added when there is a use for them. For that reason the code is flat
+- **Two tools.** `gcp_rag_search_course` and the read-only `gcp_rag_check_setup`; more can be added when there is a use for them. For that reason the code is flat
   (`server.py`) and has no `tools/` folder yet: a sub-package for a single tool would be clutter.
 - **The model is loaded on the first question**, with the database connection. If a search fails, the connection is
   closed and reopened on the next one; the model is kept.
@@ -234,6 +263,7 @@ src/gcp_rag_mcp/
 ├── __main__.py     # python -m gcp_rag_mcp: builds the server and runs it over stdio
 ├── config.py       # Settings: database and model folder, from the environment
 ├── retriever.py    # LazyRetriever: loads the model and the connection on the first search
+├── setup_check.py  # run_checks: model files and database, and the setup guide for the help tool
 └── server.py       # create_server: the FastMCP server and its tool
 tests/              # mirrors src/; test_integration.py needs the database and the model
 pyproject.toml
@@ -242,7 +272,7 @@ README.md
 
 ## Checks run
 
-- 24 tests: the tool, its arguments, its limits and its errors through FastMCP's in-memory client; the lazy loading and the
+- 31 tests: the tool, its arguments, its limits and its errors through FastMCP's in-memory client; the lazy loading and the
   reconnection with stand-ins; the settings; and one test with the real model and index.
 - Bandit (no issues), pip-audit on the pinned dependencies (no known vulnerabilities) and detect-secrets (none), and Ruff.
 
