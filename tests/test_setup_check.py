@@ -2,8 +2,11 @@ from pathlib import Path
 
 import pytest
 
+from gcp_rag_mcp.catalog import MODELS
 from gcp_rag_mcp.config import Settings
-from gcp_rag_mcp.setup_check import MODEL_FILES, run_checks
+from gcp_rag_mcp.setup_check import run_checks
+
+MODEL_FILES = MODELS["bge-m3"].files
 
 
 class FakeConnection:
@@ -90,9 +93,24 @@ def test_the_guide_says_where_to_get_each_piece_and_where_the_model_goes(model_d
         "https://github.com/estvn/GCP-ANALYTICS_RAG",
         "https://github.com/estvn/GCP-ANALYTICS_RAG_MCP",
         "https://huggingface.co/onnx-community/bge-m3-ONNX",
-        "podman start rag-db",
+        "podman start rag-db-bge",
         "./setup.sh",
+        "python -m gcp_rag_mcp switch",
         str(model_dir),
     ):
         assert piece in guide
     assert "secret-password" not in guide
+
+
+def test_with_the_light_model_the_checks_and_the_guide_talk_about_its_files_image_and_container(tmp_path):
+    e5 = MODELS["e5-small"]
+    for name in e5.files:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"x")
+
+    report = run_checks(Settings(database_url="postgresql://rag@h/courses_e5", model_dir=tmp_path, model=e5), lambda url: FakeConnection())
+
+    assert report["ready"] is True and "e5-small" in by_name(report)["model"]["detail"]
+    for piece in (e5.image, "podman start rag-db-e5", "https://huggingface.co/Xenova/multilingual-e5-small", "model_quantized.onnx"):
+        assert piece in report["guide"]
+    assert "ghcr.io/estvn/gcp-rag-db:bge-m3" not in report["guide"]

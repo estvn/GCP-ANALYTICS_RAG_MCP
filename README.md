@@ -51,11 +51,41 @@ writes the translation, so no translation model is needed.
 
 ### The help tool: `gcp_rag_check_setup`
 
-No arguments. A new Claude session can call it to find out whether a search will work: it checks that the three bge-m3
-files are in the model folder and that the database answers with a non-empty index, and it returns `ready`, one check per
+No arguments. A new Claude session can call it to find out whether a search will work: it checks that the three files of
+the model in use are in the model folder and that the database answers with a non-empty index, and it returns `ready`, one check per
 piece with its detail, and a guide with where to get what is missing (the same links as the section below). The server
 tells the model to call it when a search fails. A failure never reveals the database host or password to the client: the
 detail stays in the server log.
+
+## Commands: install and change the model
+
+Besides the server, the package has commands to install the model and its database and to change them later. Run them with
+the Python of this repository (`uv run python -m gcp_rag_mcp <command>`); with no command the same module runs the MCP
+server, which is what the clients start.
+
+| command | what it does |
+|---|---|
+| `setup` | First install. Explains the two models, **asks which one you want**, then downloads that model's files into `../rag/models/<model>/`, pulls the database image already loaded with the course indexed by that model, starts it and remembers the choice. `setup --model e5-small` skips the question. |
+| `switch` | Changes to the other model: downloads its files and its database image, stops the other database (its container and volume are kept, so switching back is instant) and remembers the choice. `switch --model bge-m3` skips the question. **Restart the MCP server afterwards** (`/mcp` in Claude Code, or open a new session): the client keeps the old model until then. If the download or the database fails, the previous choice stays. |
+| `status` | Shows the model in use and whether its files and its database are ready; exits with 1 if something is missing. |
+| `help` | Lists these commands. `python -m gcp_rag_mcp --help` also works. |
+
+The two models, and what each one downloads (the model file is checked against its SHA-256; the database image holds the
+index built with that same model, so the vectors always match):
+
+| model | files, from a pinned revision | size | database image (database) | vectors |
+|---|---|---|---|---|
+| `bge-m3` (default, best ranking in experiment E33) | `onnx/model_int8.onnx`, `tokenizer.json`, `config.json` from [onnx-community/bge-m3-ONNX](https://huggingface.co/onnx-community/bge-m3-ONNX) at `25b9af8e` | 559 MB, about 1.1 GB of RAM loaded | `ghcr.io/estvn/gcp-rag-db:bge-m3` (`courses_bge`) | 1024 |
+| `e5-small` (light) | `onnx/model_quantized.onnx`, `tokenizer.json`, `config.json` from [Xenova/multilingual-e5-small](https://huggingface.co/Xenova/multilingual-e5-small) at `761b726d` | 130 MB | `ghcr.io/estvn/gcp-rag-db:e5-small` (`courses_e5`) | 384 |
+
+Each model has its own container (`rag-db-bge`, `rag-db-e5`) and volume. Both publish the port 5433, so starting one stops the
+other (and the old `rag-db`, if it is running); nothing is ever deleted. To pick the model for one run without changing the
+saved choice, set `RAG_MODEL=bge-m3` or `RAG_MODEL=e5-small` in the client's `env`: it wins over the saved choice. The saved
+choice is the file `~/.gcp-rag-mcp/preferences.json` (folder changeable with `RAG_MCP_HOME`).
+
+`./setup.sh` is the bootstrap for a machine with nothing: it clones the RAG repository next to this one and runs `uv sync`
+(the `setup` command needs both), then runs `setup`. `./setup.sh --model e5-small` passes the model through and
+`./setup.sh --check` runs `status`. It needs `git`, `uv` and `podman`.
 
 ## Use it
 
@@ -136,12 +166,12 @@ A search needs five things. Only the database container has to be started by han
 | the bge-m3 model, int8 ONNX | [onnx-community/bge-m3-ONNX](https://huggingface.co/onnx-community/bge-m3-ONNX) | download `onnx/model_int8.onnx`, `tokenizer.json` and `config.json` into `../rag/models/bge-m3/` (`onnx/model_int8.onnx` there) |
 | Claude Code or OpenCode | | [register the server](#register-it-in-a-client) |
 
-**All in one command.** `./setup.sh` (Git Bash on Windows, or any Linux or macOS shell) does every row of the table that is
-missing and leaves alone what is already there: it clones the RAG repository next to this one, runs `uv sync`, downloads the
-three model files (and checks the SHA-256 of `model_int8.onnx`), creates or starts the `rag-db` container and waits until it
-answers. It needs `git`, `uv`, `podman` and `curl`. `./setup.sh --check` only reports what is missing, changes nothing and
-exits with 1 if something is missing. It was run for real in an empty folder (clone, 542 MB download, hash check, running
-container) and in check mode; the paths for a stopped container and for a stopped Podman machine were not exercised.
+**All in one command.** `./setup.sh` (Git Bash on Windows, or any Linux or macOS shell) clones the RAG repository next to
+this one, runs `uv sync` and then the `setup` command, which asks which model you want and does the rest (model files with
+their SHA-256 check, database image, container). It leaves alone what is already there. See
+[Commands](#commands-install-and-change-the-model). The commands were tested with stand-ins for Hugging Face and Podman, the
+model download was run for real for `e5-small` and the pinned URLs and hashes of both models were checked against Hugging
+Face; creating a container from the published `e5-small` image was not run on a clean machine.
 
 ```bash
 podman run -d --name rag-db -p 127.0.0.1:5433:5432 -v rag_pgdata:/var/lib/postgresql/data   ghcr.io/estvn/gcp-rag-db:bge-m3        # first time: restores the index, a few seconds
@@ -149,7 +179,8 @@ podman start rag-db                      # the next times (and `podman machine s
 ```
 
 The `model_int8.onnx` used here and the one in that Hugging Face repository have the same SHA-256 (`2237f770...`). The image holds the index and not the model, and the index must be
-queried with the model it was built with (bge-m3 for `:bge-m3`; the server is wired to bge-m3).
+queried with the model it was built with (bge-m3 for `:bge-m3`, e5-small for `:e5-small`); the server uses the model chosen
+with `setup` or `switch`.
 
 ### What must be ready for a search to work
 
@@ -165,10 +196,11 @@ A search needs both the model and the database; the difference is who puts them 
 "Connected" in `claude mcp list` only proves that the server process started: the database and the model are first
 touched by the first search, so a stopped container shows up as an error on the first question, not before.
 
-Two environment variables change where it looks, if the defaults do not fit:
+Three environment variables change what it uses, if the defaults do not fit:
 
 | variable | default |
 |---|---|
+| `RAG_MODEL` | the model saved by `setup` or `switch`, or `bge-m3` if none was chosen. Picks the model, its database and its files together; `bge-m3` or `e5-small` |
 | `RAG_DATABASE_URL` | `postgresql://rag:rag@127.0.0.1:5433/courses_bge?connect_timeout=5` (the index of the winning configuration with the GCP and Power BI courses, local credentials; with the database down the tool fails in 5 seconds) |
 | `RAG_MODEL_DIR` | the `models/bge-m3` folder of the RAG repository |
 
@@ -275,8 +307,13 @@ Deliberately not applied:
 
 ```
 src/gcp_rag_mcp/
-├── __main__.py     # python -m gcp_rag_mcp: builds the server and runs it over stdio
-├── config.py       # Settings: database and model folder, from the environment
+├── __main__.py     # python -m gcp_rag_mcp: runs the server over stdio, or a command if it gets arguments
+├── cli.py          # the commands: setup, switch, status, help
+├── catalog.py      # the two models: source, pinned revision, SHA-256, database image, container
+├── preferences.py  # the model chosen with setup or switch, saved in a small file
+├── downloads.py    # download_model: model files from Hugging Face, checked against their SHA-256
+├── database.py     # ensure_database: starts the Podman container of a model, stops the other
+├── config.py       # Settings: model, database and model folder, from the environment and the saved choice
 ├── retriever.py    # LazyRetriever: loads the model and the connection on the first search
 ├── setup_check.py  # run_checks: model files and database, and the setup guide for the help tool
 └── server.py       # create_server: the FastMCP server and its tool
@@ -288,8 +325,9 @@ README.md
 
 ## Checks run
 
-- 31 tests: the tool, its arguments, its limits and its errors through FastMCP's in-memory client; the lazy loading and the
-  reconnection with stand-ins; the settings; and one test with the real model and index.
+- 60 tests: the tool, its arguments, its limits and its errors through FastMCP's in-memory client; the lazy loading and the
+  reconnection with stand-ins; the settings and the model choice; the commands, the download (hash check, damaged files,
+  nothing half downloaded) and the container handling with stand-ins; and two tests with the real model and index.
 - Bandit (no issues), pip-audit on the pinned dependencies (no known vulnerabilities) and detect-secrets (none), and Ruff.
 
 ## What is not proven yet

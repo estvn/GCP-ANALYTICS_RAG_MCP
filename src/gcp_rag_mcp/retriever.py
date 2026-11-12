@@ -4,7 +4,8 @@ import contextlib
 import threading
 from collections.abc import Callable
 
-from rag.embed import BGE_M3, Embedder
+from rag.embed import MODELS as SPECS
+from rag.embed import Embedder
 from rag.retrieval import HybridRetriever
 from rag.store import connect
 
@@ -50,6 +51,6 @@ class LazyRetriever:
 
 def build_retriever(settings: Settings) -> LazyRetriever:
     return LazyRetriever(
-        open_embedder=lambda: Embedder(settings.model_dir, BGE_M3),
+        open_embedder=lambda: Embedder(settings.model_dir, SPECS[settings.model.key][0]),
         open_connection=lambda: connect(settings.database_url),
     )
