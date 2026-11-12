@@ -61,7 +61,7 @@ def test_setup_does_not_install_anything_if_nobody_chooses(tmp_path):
 
 
 def test_setup_with_the_model_flag_does_not_ask(tmp_path):
-    code, _, env = run(["setup", "--model", "e5-small"], tmp_path)
+    code, rec, _ = run(["setup", "--model", "e5-small"], tmp_path)
 
     assert code == 0 and rec.downloaded == ["e5-small"]
 
