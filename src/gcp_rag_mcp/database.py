@@ -31,7 +31,10 @@ def ensure_database(
     if not status:
         say(f"creating {option.container} from {option.image} (the first start restores the index, a few seconds) ...")
         _checked(
-            ["run", "-d", "--name", option.container, "-p", PORT, "-v", f"{option.volume}:/var/lib/postgresql/data", option.image],
+            [
+                "run", "-d", "--pull=newer", "--name", option.container, "-p", PORT,
+                "-v", f"{option.volume}:/var/lib/postgresql/data", option.image,
+            ],
             run,
         )
     elif not status.startswith("Up"):

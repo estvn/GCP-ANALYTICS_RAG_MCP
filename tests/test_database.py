@@ -35,6 +35,7 @@ def test_a_missing_container_is_created_from_the_image_of_the_model():
     created = next(c for c in fake.commands if c[0] == "run")
     assert E5.image in created and E5.container in created and E5.volume + ":/var/lib/postgresql/data" in created
     assert "127.0.0.1:5433:5432" in created
+    assert "--pull=newer" in created  # a copy of the image already on the machine may hold an older index
 
 
 def test_a_stopped_container_is_started_and_a_running_one_is_left_alone():
